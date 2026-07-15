@@ -1,0 +1,11 @@
+REPLACE THIS FILE WITH YOUR EXTRACTION PROMPT.
+
+This is the only place document-specific instructions should live: schema,
+column codes, language, JSON format requirements, edge-case handling, etc.
+
+The text in this file is sent to the model alongside every training image
+(and at inference time), so it should be the exact instruction set you want
+the fine-tuned model to internalize.
+
+Nothing in src/ needs to change when you swap this file for a different
+document type.

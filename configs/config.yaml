@@ -1,0 +1,55 @@
+# =============================================================================
+# vlm-training-pipeline config
+#
+# This is the ONE file you should need to edit to fine-tune a vision-language
+# model on your own document dataset. Everything document-specific (the
+# extraction instructions, column schema, etc.) belongs in the prompt file
+# referenced below, NOT in this file and NOT in the Python source.
+# =============================================================================
+
+# --- Model ---------------------------------------------------------------
+# Any Unsloth-supported vision model. Swap this to scale from a quick
+# mechanics-test run (small model) to your real fine-tune (larger model).
+# Examples: "unsloth/Qwen3.5-4B", "unsloth/Qwen3.5-9B"
+base_model: "unsloth/Qwen3.5-4B"
+load_in_4bit: true          # set false if you have VRAM to spare and want bf16/LoRA without quantization
+max_seq_length: 2048
+
+# --- Prompt ----------------------------------------------------------------
+# Plain text file containing the extraction instructions shown to the model
+# alongside each training image. This is where all document-type-specific
+# knowledge (column codes, schema, language, etc.) lives.
+prompt_file: "prompts/extraction_prompt.txt"
+
+# --- Dataset -----------------------------------------------------------
+dataset:
+  images_dir: "dataset/images"      # {id}.jpg / {id}.png etc, one per document
+  labels_dir: "dataset/labels"      # {id}.json, VERIFIED ground truth only — never train on labels_draft
+  image_ext: ".jpg"                 # extension used to match images to labels
+
+# --- LoRA ----------------------------------------------------------------
+lora:
+  r: 16
+  alpha: 16
+  dropout: 0.05
+  finetune_vision_layers: true
+  finetune_language_layers: true
+  finetune_attention_modules: true
+  finetune_mlp_modules: true
+
+# --- Training --------------------------------------------------------------
+training:
+  output_dir: "outputs/adapters/run1"   # trained adapter is saved here
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 4
+  num_train_epochs: 3
+  learning_rate: 2.0e-4
+  warmup_steps: 5
+  logging_steps: 1
+  save_strategy: "epoch"
+  seed: 3407
+
+# --- Inference -------------------------------------------------------------
+inference:
+  max_new_tokens: 2048
+  temperature: 0.0

@@ -1,0 +1,13 @@
+[project]
+name = "vlm-training-pipeline"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pillow>=12.3.0",
+    "torch>=2.10.0",
+    "torchvision>=0.25.0",
+    "unsloth>=2026.7.2",
+    "unsloth-zoo>=2026.7.2",
+]
