@@ -61,7 +61,13 @@ def main():
     trainer = SFTTrainer(
         model=model,
         tokenizer=tokenizer,
-        data_collator=UnslothVisionDataCollator(model, tokenizer),
+        data_collator=UnslothVisionDataCollator(
+                      model,
+                            tokenizer,
+                            train_on_responses_only=True,
+                            instruction_part="<|im_start|>user\n",
+                            response_part="<|im_start|>assistant\n",
+                        ),
         train_dataset=conversations,
         args=SFTConfig(
             per_device_train_batch_size=train_cfg.get("per_device_train_batch_size", 1),
