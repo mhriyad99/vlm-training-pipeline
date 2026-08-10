@@ -44,6 +44,22 @@ def load_prompt(config: dict) -> str:
     return text
 
 
+def resize_image_width(image: Image.Image, target_width: int) -> Image.Image:
+    """Downscale an image to `target_width`, preserving aspect ratio.
+
+    Mirrors what UnslothVisionDataCollator(resize=<int>) does to training
+    images (unsloth_zoo/vision_utils.py), so inference feeds the model the same
+    resolution it was trained on. Images already at or below the target are
+    returned untouched — the collator only ever downscales.
+    """
+    w, h = image.size
+    if w <= target_width:
+        return image
+    new_w = max(1, (w * target_width + w // 2) // w)
+    new_h = max(1, (h * target_width + w // 2) // w)
+    return image.resize((new_w, new_h), Image.LANCZOS)
+
+
 def find_label_image_pairs(config: dict) -> list[tuple[Path, Path]]:
     """Match verified label JSONs to their corresponding images.
 
@@ -84,21 +100,38 @@ def find_label_image_pairs(config: dict) -> list[tuple[Path, Path]]:
     return pairs
 
 
-def build_conversations(config: dict) -> list[dict]:
+def build_conversations(
+    config: dict,
+    pairs: list[tuple[Path, Path]] | None = None,
+    limit: int | None = None,
+) -> list[dict]:
     """Build the Unsloth-format conversation list from verified labels.
 
     Each element is a chat-style conversation: the extraction prompt + image
     as the user turn, and the ground truth JSON (as a string) as the
     assistant turn.
+
+    Pass `pairs` to build from an already-filtered pair list (e.g. after
+    dropping labels that failed validation) instead of rescanning the dirs.
+    Pass `limit` to build only the first N pairs — images are decoded here, so
+    limiting before this call is what makes a smoke test actually cheap.
     """
     prompt_text = load_prompt(config)
-    pairs = find_label_image_pairs(config)
+    if pairs is None:
+        pairs = find_label_image_pairs(config)
+    if limit is not None:
+        pairs = pairs[:limit]
 
     conversations = []
     for img_path, label_path in pairs:
         image = Image.open(img_path).convert("RGB")
         with open(label_path, "r", encoding="utf-8") as f:
-            ground_truth = json.load(f)
+            try:
+                ground_truth = json.load(f)
+            except json.JSONDecodeError as e:
+                # Without the filename this surfaces as a bare JSONDecodeError
+                # and you have to bisect the dataset to find the culprit.
+                raise ValueError(f"{label_path} is not valid JSON: {e}") from e
         ground_truth_str = json.dumps(ground_truth, ensure_ascii=False)
 
         conversation = {

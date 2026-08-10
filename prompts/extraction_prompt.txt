@@ -1,11 +1,84 @@
-REPLACE THIS FILE WITH YOUR EXTRACTION PROMPT.
+Extract all table data from this Bangla Khatian (land record) image as JSON.
+Read exactly what's printed; don't assume a template. Output ONLY JSON.
 
-This is the only place document-specific instructions should live: schema,
-column codes, language, JSON format requirements, edge-case handling, etc.
+Three independent lists: OWNER entries (col ১ name, col ２ অংশ/share), দাগ
+entries (every column between owner cols and remarks col), REMARKS (last
+column). Counts need not match across lists.
 
-The text in this file is sent to the model alongside every training image
-(and at inference time), so it should be the exact instruction set you want
-the fine-tuned model to internalize.
+SCHEMA:
+{
+  "page": 1, "table": 1,
+  "metadata": {"<printed Bangla label>": "<value>"},
+  "headers": [{"code": "<printed Bangla numeral, incl. ১ and ２>",
+               "sub_label": "<own text or \"\">",
+               "label": "<group label if grouped, else own label>"}],
+  "owners": [{"serial": "<printed serial or \"\">",
+              "top_row": "<OPTIONAL: category line printed before this
+                owner with no field of its own, e.g. মালিক/সরকারী মালিক;
+                omit key entirely otherwise>",
+              "name": "<personal name only>",
+              "father_name": "<FULL relation line as printed, tag+dash
+                included, e.g. \"সর্ব পিতা- মৃত মোঃ হারুন অর রশীদ\">",
+              "mother_name": "<same style>",
+              "spouse_name": "<same style, e.g. \"স্বামী- মৃত চান মিয়া\">",
+              "address": "<full address as printed>",
+              "share": "<REQUIRED, this owner's own অংশ value>"}],
+  "dags": [{"<code>": "<value>"}]  // every code except remarks col; no owner link,
+  "remarks": [{"starts_at_dag_number": "<দাগ number this block starts beside>",
+               "<remarks col code>": "<text as printed>"}],
+  "summary": {"dag_count_note": "", "total_land_acre": "",
+    "total_land_percentage": "", "total_shotangsho_words": "",
+    "case_reference": "", "other": ""}
+}
 
-Nothing in src/ needs to change when you swap this file for a different
-document type.
+OWNERS — hard rules:
+- One object per distinct PERSON in col ১. A line is an owner object ONLY if
+  it names a specific person.
+- Abbreviations: পিং=পিতা, মিং=মাতা, জং/স্বাং=স্বামী, সাং=address. Same
+  handling as full words below.
+- NEVER make an owner object out of a relation/address line (starts with
+  সর্ব, or is পিতা-/মাতা-/স্বামী-/স্ত্রী-/পিং/মিং/জং/স্বাং/সাং + someone's
+  name). Instead fold the FULL line (tag+dash included) into father_name/
+  mother_name/spouse_name/address on the immediately PRECEDING owner only —
+  never spread across multiple earlier owners.
+- Category lines with no owner name (মালিক, বেসরকারী মালিক, সরকারী মালিক)
+  go into "top_row" on the very next owner, not their own object.
+- "share": read fresh per owner, never copy forward. 3+ identical values in
+  a row = re-check, likely copy error.
+- Every printed serial must get its own real owner object — a relation-tag
+  name never substitutes for a distinct owner elsewhere in the column.
+
+DAGS:
+- One object per distinct দাগ number; every দাগ-range code (দাগ-number
+  through, but not including, remarks) must be a key, blank if unprinted.
+- One দাগ's data = one object even if visually split across lines.
+- মোট/টোটাল (total) lines go in "summary" (একর/শতাংশ separately), never in
+  "dags".
+
+REMARKS:
+- Only create entries where text is actually printed; no empty placeholders.
+- One block spanning multiple দাগ rows = one entry, tagged to the starting
+  দাগ number.
+
+HEADERS/CELLS:
+- "code" = printed Bangla numeral only, never a label; unique per column.
+- Sub-columns under one group share "label" but NOT values — (ক)/(খ) pairs
+  are independent; blank if unprinted, don't cross-fill.
+- Cell placement is by printed POSITION, not by what the word/number seems
+  to mean.
+
+METADATA:
+- Keys = exact printed Bangla label (comma-containing labels are one key).
+  খতিয়ান নং must always be present.
+
+TOTALS: total_land_acre/percentage come ONLY from an explicit total line,
+never computed by summing owner shares (that's a different figure).
+
+DIGITS: Bangla numerals exactly as printed; never guess between look-alikes
+(৩/৬, ৭/৯, ৪/৮) — leave "" if unsure. Stacked fractions: "৫-১/২".
+
+Before returning, check: every owner "name" is a real person's name (not a
+relation/category word); every owner has its own "share"; no দাগ split
+across two objects or mistaken for a total; remarks reference the right
+starting দাগ; relation fields hold the full line, not a trimmed name; only
+one owner (if any) carries "top_row".

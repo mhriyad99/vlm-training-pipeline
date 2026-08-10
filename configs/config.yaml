@@ -11,9 +11,21 @@
 # Any Unsloth-supported vision model. Swap this to scale from a quick
 # mechanics-test run (small model) to your real fine-tune (larger model).
 # Examples: "unsloth/Qwen3.5-4B", "unsloth/Qwen3.5-9B"
-base_model: "unsloth/Qwen3.5-4B"
+base_model: "/home/mhriyad99/.cache/huggingface/hub/models--unsloth--Qwen3.5-4B"
 load_in_4bit: true          # set false if you have VRAM to spare and want bf16/LoRA without quantization
-max_seq_length: 2048
+max_seq_length: 8096        # measured longest example: 5191 tokens at image_resize 2048,
+                            # ~6490 at 2560. Headroom is deliberate — with batch size 1
+                            # there is no padding, so a generous cap costs no memory.
+
+# --- Image resolution ------------------------------------------------------
+# Width in px each document image is resized to before tokenizing (aspect
+# preserved). This is the knob that decides whether the model can actually READ
+# the document — max_seq_length only decides whether it gets truncated.
+#   visual tokens = (W/32) * (H/32)   [32 px per token = patch_size 16 * spatial_merge_size 2]
+#   2048 -> 64 x 36 = 2304 tokens  (the vision tower's pretrained grid; needs max_seq_length 8096)
+#   1536 -> 48 x 27 = 1296 tokens  (fallback if 2048 runs out of VRAM)
+# Must match between training and inference or results are silently garbage.
+image_resize: 2048
 
 # --- Prompt ----------------------------------------------------------------
 # Plain text file containing the extraction instructions shown to the model
@@ -51,5 +63,5 @@ training:
 
 # --- Inference -------------------------------------------------------------
 inference:
-  max_new_tokens: 2048
-  temperature: 0.0
+  max_new_tokens: 2048        # longest ground-truth response measured is 1679 tokens
+  temperature: 0.0            # 0.0 = greedy decoding, the right choice for extraction
