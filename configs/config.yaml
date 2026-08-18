@@ -1,43 +1,24 @@
-# =============================================================================
-# vlm-training-pipeline config
-#
-# This is the ONE file you should need to edit to fine-tune a vision-language
-# model on your own document dataset. Everything document-specific (the
-# extraction instructions, column schema, etc.) belongs in the prompt file
-# referenced below, NOT in this file and NOT in the Python source.
-# =============================================================================
-
 # --- Model ---------------------------------------------------------------
-# Any Unsloth-supported vision model. Swap this to scale from a quick
-# mechanics-test run (small model) to your real fine-tune (larger model).
-# Examples: "unsloth/Qwen3.5-4B", "unsloth/Qwen3.5-9B"
-base_model: "/home/mhriyad99/.cache/huggingface/hub/models--unsloth--Qwen3.5-4B"
-load_in_4bit: true          # set false if you have VRAM to spare and want bf16/LoRA without quantization
-max_seq_length: 8096        # measured longest example: 5191 tokens at image_resize 2048,
-                            # ~6490 at 2560. Headroom is deliberate — with batch size 1
-                            # there is no padding, so a generous cap costs no memory.
+base_model: "unsloth/Qwen3.5-4B"     # switching back based on your 87-image result
+load_in_4bit: false                  # 4B in bf16 is tiny (~8GB) — even more headroom than 9B had, no reason to quantize
+max_seq_length: 8096                 # re-measure against your actual 409-image labels before locking this in
 
 # --- Image resolution ------------------------------------------------------
-# Width in px each document image is resized to before tokenizing (aspect
-# preserved). This is the knob that decides whether the model can actually READ
-# the document — max_seq_length only decides whether it gets truncated.
-#   visual tokens = (W/32) * (H/32)   [32 px per token = patch_size 16 * spatial_merge_size 2]
-#   2048 -> 64 x 36 = 2304 tokens  (the vision tower's pretrained grid; needs max_seq_length 8096)
-#   1536 -> 48 x 27 = 1296 tokens  (fallback if 2048 runs out of VRAM)
-# Must match between training and inference or results are silently garbage.
-image_resize: 2048
+image_resize: 2048                   # unchanged
 
 # --- Prompt ----------------------------------------------------------------
-# Plain text file containing the extraction instructions shown to the model
-# alongside each training image. This is where all document-type-specific
-# knowledge (column codes, schema, language, etc.) lives.
 prompt_file: "prompts/extraction_prompt.txt"
 
 # --- Dataset -----------------------------------------------------------
 dataset:
-  images_dir: "dataset/images"      # {id}.jpg / {id}.png etc, one per document
-  labels_dir: "dataset/labels"      # {id}.json, VERIFIED ground truth only — never train on labels_draft
-  image_ext: ".jpg"                 # extension used to match images to labels
+  images_dir: "dataset/images"
+  labels_dir: "dataset/labels"
+  image_ext: ".jpg"
+  # Held-out split, never trained on. Its only job is to produce an eval_loss
+  # each epoch so you can tell which checkpoint to keep instead of assuming the
+  # last one is best. Comment both lines out to train with no eval at all.
+  holdout_images_dir: "dataset/holdout_images"
+  holdout_labels_dir: "dataset/holdout_labels"
 
 # --- LoRA ----------------------------------------------------------------
 lora:
@@ -51,17 +32,26 @@ lora:
 
 # --- Training --------------------------------------------------------------
 training:
-  output_dir: "outputs/adapters/run1"   # trained adapter is saved here
-  per_device_train_batch_size: 1
-  gradient_accumulation_steps: 4
+  output_dir: "outputs/adapters/run1_4b_409img"   # renamed so you don't overwrite the 87-image run's adapter
+  per_device_train_batch_size: 1       # 4B bf16 leaves much more room than 9B did — worth trying 4 first
+  gradient_accumulation_steps: 8         # effective batch 8, same as your 9B plan
   num_train_epochs: 3
   learning_rate: 2.0e-4
-  warmup_steps: 5
+  warmup_steps: 10                       # ~409/8 ≈ 51 steps/epoch × 3 ≈ 153 total steps — same math as before
   logging_steps: 1
   save_strategy: "epoch"
   seed: 3407
+  # --- Eval on the holdout split ---
+  # eval_strategy must equal save_strategy for load_best_model_at_end to work;
+  # train.py checks this and refuses to start if they diverge, rather than
+  # letting the run fail hours in.
+  eval_strategy: "epoch"
+  per_device_eval_batch_size: 1   # eval peaks lower than training (no grads), but
+                                  # 1 keeps it strictly below the training peak
+  load_best_model_at_end: true    # saved adapter = lowest eval_loss epoch, not the last
+  save_total_limit: 3             # the best checkpoint is always exempt from deletion
 
 # --- Inference -------------------------------------------------------------
 inference:
-  max_new_tokens: 2048        # longest ground-truth response measured is 1679 tokens
-  temperature: 0.0            # 0.0 = greedy decoding, the right choice for extraction
+  max_new_tokens: 2048
+  temperature: 0.0

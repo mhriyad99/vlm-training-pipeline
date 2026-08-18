@@ -80,6 +80,39 @@ def main():
               f"{', '.join(label.stem for _, label in pairs)}")
     conversations = build_conversations(config, pairs=pairs)
 
+    # Held-out eval split. Without it the run still trains, but every epoch's
+    # checkpoint looks equally good and you end up keeping the last one by
+    # default — which on a small dataset is the one most likely to have
+    # overfit. Skipped during --probe: the probe exists to measure the training
+    # peak, and interleaving eval would both slow it down and report a peak
+    # that no real epoch actually hits.
+    eval_conversations = None
+    ds_cfg = config["dataset"]
+    holdout_keys = ("holdout_images_dir", "holdout_labels_dir")
+    if args.probe:
+        print("PROBE: holdout eval disabled for this measurement run")
+    elif all(k in ds_cfg for k in holdout_keys):
+        holdout_pairs = find_label_image_pairs(
+            config, images_key="holdout_images_dir", labels_key="holdout_labels_dir"
+        )
+        print(f"Building holdout eval set from {ds_cfg['holdout_labels_dir']}...")
+        eval_conversations = build_conversations(config, pairs=holdout_pairs)
+
+        # A stem appearing in both splits silently turns eval_loss into training
+        # loss, making the model look better every epoch exactly when it is
+        # overfitting. Cheap to check here; impossible to notice later.
+        train_stems = {label.stem for _, label in pairs}
+        overlap = sorted(train_stems & {label.stem for _, label in holdout_pairs})
+        if overlap:
+            raise ValueError(
+                f"{len(overlap)} example(s) appear in BOTH the training and holdout "
+                f"splits, e.g. {overlap[:5]}. eval_loss would be meaningless. "
+                f"Remove them from one split before training."
+            )
+    else:
+        print("No holdout_*_dir in config.dataset — training without eval "
+              "(no eval_loss, so the last epoch's adapter is what gets saved)")
+
     FastVisionModel.for_training(model)
 
     train_cfg = config["training"]
@@ -104,6 +137,30 @@ def main():
         dataset_kwargs={"skip_prepare_dataset": True},
         max_seq_length=config.get("max_seq_length", 2048),
     )
+
+    if eval_conversations is not None:
+        eval_strategy = train_cfg.get("eval_strategy", "epoch")
+        save_strategy = train_cfg.get("save_strategy", "epoch")
+        load_best = train_cfg.get("load_best_model_at_end", True)
+        if load_best and eval_strategy != save_strategy:
+            # HF raises this itself, but only after the model is on the GPU.
+            # Failing here costs seconds instead of a model load.
+            raise ValueError(
+                f"load_best_model_at_end requires eval_strategy == save_strategy, "
+                f"got eval_strategy={eval_strategy!r} save_strategy={save_strategy!r}. "
+                f"Fix configs/config.yaml before starting the run."
+            )
+        sft_kwargs.update(
+            eval_strategy=eval_strategy,
+            per_device_eval_batch_size=train_cfg.get("per_device_eval_batch_size", 1),
+            load_best_model_at_end=load_best,
+            # Explicit rather than relying on the default: eval_loss is the only
+            # metric produced here, and lower is better.
+            metric_for_best_model="eval_loss",
+            greater_is_better=False,
+        )
+        if "save_total_limit" in train_cfg:
+            sft_kwargs["save_total_limit"] = train_cfg["save_total_limit"]
     if args.probe:
         # grad-accum 1 so max_steps == exactly one fwd/bwd per heaviest example.
         # The optimizer step still runs each step, so 8-bit Adam state
@@ -135,6 +192,7 @@ def main():
             response_part="<|im_start|>assistant\n",
         ),
         train_dataset=conversations,
+        eval_dataset=eval_conversations,
         args=SFTConfig(**sft_kwargs),
     )
 

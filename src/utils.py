@@ -60,17 +60,26 @@ def resize_image_width(image: Image.Image, target_width: int) -> Image.Image:
     return image.resize((new_w, new_h), Image.LANCZOS)
 
 
-def find_label_image_pairs(config: dict) -> list[tuple[Path, Path]]:
+def find_label_image_pairs(
+    config: dict,
+    images_key: str = "images_dir",
+    labels_key: str = "labels_dir",
+) -> list[tuple[Path, Path]]:
     """Match verified label JSONs to their corresponding images.
 
     Only reads from dataset.labels_dir (verified ground truth). Files in a
     labels_draft/ directory, if present, are intentionally never touched by
     this function — that separation is what makes it structurally hard to
     accidentally train on unverified model output.
+
+    `images_key`/`labels_key` select which pair of dataset.* config entries to
+    read, so the same pairing and validation logic serves both the training
+    split and the holdout eval split. Defaults keep every existing caller
+    unchanged.
     """
     ds_cfg = config["dataset"]
-    images_dir = Path(ds_cfg["images_dir"])
-    labels_dir = Path(ds_cfg["labels_dir"])
+    images_dir = Path(ds_cfg[images_key])
+    labels_dir = Path(ds_cfg[labels_key])
     image_ext = ds_cfg["image_ext"]
 
     if not labels_dir.exists():
